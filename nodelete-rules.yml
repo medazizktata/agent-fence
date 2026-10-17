@@ -1,0 +1,29 @@
+# ast-grep rules: calls that delete or move files. Used by the ccfind and agent-fence
+# harnesses as a structural check (`ast-grep scan --rule nodelete-rules.yml <files>`).
+# They match real calls only, never the same words inside strings or comments.
+id: python-delete-call
+language: python
+severity: error
+message: file delete or move call
+rule:
+  any:
+    - pattern: os.remove($$$)
+    - pattern: os.unlink($$$)
+    - pattern: os.rmdir($$$)
+    - pattern: os.removedirs($$$)
+    - pattern: os.rename($$$)
+    - pattern: os.replace($$$)
+    - pattern: shutil.rmtree($$$)
+    - pattern: shutil.move($$$)
+    - pattern: $P.unlink($$$)
+    - pattern: $P.rmdir($$$)
+---
+id: bash-delete-command
+language: bash
+severity: error
+message: file delete command
+rule:
+  kind: command
+  has:
+    field: name
+    regex: ^(rm|rmdir|unlink|shred|srm)$

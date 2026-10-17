@@ -1,0 +1,104 @@
+#!/bin/bash
+# agent-fence: run any agent CLI or TUI (claude, codex, opencode, cursor-agent, ...) inside a
+# macOS sandbox (sandbox-exec). The OS enforces it for the whole process tree, whatever the
+# agent or its model decides.
+#
+#   agent-fence [options] [--] <tool> [tool args...]
+#
+#   (default)            writes allowed in the workspace (the current directory) and in the
+#                        tool's own state folders; blocked everywhere else
+#   --workspace DIR      use DIR as the workspace instead of the current directory
+#   --read-only          no workspace: the agent can write only its own state and temp files
+#   --no-delete          no deletes or renames inside the workspace, except under .git/.
+#                        Breaks tools that save files by renaming a temp file over the original.
+#   --allow-write DIR    also allow writes in DIR (repeatable)
+#   --protect DIR        deny writes in DIR even where otherwise allowed (repeatable)
+#   --allow-secrets      allow reading ~/.ssh, ~/.aws, ~/.gnupg, ~/.netrc, ~/.config/gh
+#                        (needed for e.g. git push over ssh)
+#   --dry-run            print the sandbox profile and the command, run nothing
+#
+# Reads and network stay open: agents need to read code and reach their API.
+# Nothing here deletes files.
+set -uo pipefail
+
+die() { echo "agent-fence: $1" >&2; exit "${2:-2}"; }
+real() { python3 -I -c 'import os,sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$1"; }
+q() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }   # SBPL string literal
+
+workspace="$PWD" read_only=0 no_delete=0 secrets=0 dry=0 extra=() protect=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --workspace)     [ $# -ge 2 ] || die "--workspace needs a directory"; workspace=$2; shift 2 ;;
+    --read-only)     read_only=1; shift ;;
+    --no-delete)     no_delete=1; shift ;;
+    --allow-write)   [ $# -ge 2 ] || die "--allow-write needs a directory"; extra+=("$2"); shift 2 ;;
+    --protect)       [ $# -ge 2 ] || die "--protect needs a directory"; protect+=("$2"); shift 2 ;;
+    --allow-secrets) secrets=1; shift ;;
+    --dry-run)       dry=1; shift ;;
+    -h|--help)       sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --)              shift; break ;;
+    -*)              die "unknown option '$1' (agent-fence -h lists them)" ;;
+    *)               break ;;
+  esac
+done
+[ $# -ge 1 ] || die "usage: agent-fence [options] [--] <tool> [tool args...]"
+command -v sandbox-exec >/dev/null || die "sandbox-exec not found (macOS only)" 1
+tool_path=$(command -v "$1") || die "'$1' not found on PATH" 1
+tool=$(basename "$1"); shift
+
+# Each tool may write only its own state. Unknown tools get temp files only; add the rest
+# with --allow-write.
+state=()
+case "$tool" in
+  claude)
+    state=("${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$HOME/Library/Caches/claude-cli-nodejs")
+    [ -n "${CLAUDE_CONFIG_DIR:-}" ] || state+=("$HOME/.claude.json")   # lives in $HOME by default
+    ;;
+  codex)        state=("${CODEX_HOME:-$HOME/.codex}") ;;
+  opencode)     state=("$HOME/.local/share/opencode" "$HOME/.local/state/opencode"
+                       "$HOME/.cache/opencode" "$HOME/.config/opencode") ;;
+  cursor-agent|agent)
+                state=("$HOME/.cursor" "$HOME/.local/share/cursor-agent") ;;
+  *)            echo "agent-fence: unknown tool '$tool': only temp files are writable; add its state with --allow-write" >&2 ;;
+esac
+
+ws=""
+if [ $read_only = 0 ]; then
+  [ -d "$workspace" ] || die "workspace '$workspace' is not a directory"
+  ws=$(real "$workspace")
+  home=$(real "$HOME")
+  case "$ws" in
+    /|"$home"|/Users|/private|/private/var|/Volumes)
+      die "refusing workspace '$ws': too broad. cd into a project or pass --workspace DIR" ;;
+  esac
+  [ "$ws" = "$home/Desktop" ] || [ "$ws" = "$home/Documents" ] && \
+    echo "agent-fence: warning: workspace $ws covers every project in it" >&2
+fi
+
+secret_dirs=("$HOME/.ssh" "$HOME/.aws" "$HOME/.gnupg" "$HOME/.netrc" "$HOME/.config/gh")
+paths() { local p; for p in "$@"; do printf '  (subpath %s)\n' "$(q "$(real "$p")")"; done; }
+
+profile=$(
+  echo '(version 1)'
+  echo '(allow default)'
+  echo '(deny file-write*)'
+  echo '(allow file-write*'
+  paths "${state[@]+"${state[@]}"}" "${TMPDIR:-/tmp}" /private/tmp "$HOME/Library/Caches" \
+        ${ws:+"$ws"} "${extra[@]+"${extra[@]}"}"
+  echo '  (literal "/dev/null") (literal "/dev/zero") (literal "/dev/dtracehelper")'
+  echo '  (regex #"^/dev/tty") (regex #"^/dev/fd/") (regex #"^/dev/ptmx$") (regex #"^/dev/ttys"))'
+  if [ $no_delete = 1 ] && [ -n "$ws" ]; then
+    printf '(deny file-write-unlink (subpath %s))\n' "$(q "$ws")"
+    printf '(allow file-write-unlink (require-all (subpath %s) (regex #"/\\.git/")))\n' "$(q "$ws")"
+  fi
+  if [ ${#protect[@]} -gt 0 ]; then echo '(deny file-write*'; paths "${protect[@]}"; echo ')'; fi
+  if [ $secrets = 0 ]; then echo '(deny file-read* file-write*'; paths "${secret_dirs[@]}"; echo ')'; fi
+)
+
+if [ $dry = 1 ]; then
+  echo "$profile"
+  echo ";; command: $tool_path $*"
+  exit 0
+fi
+echo "agent-fence: $tool, workspace ${ws:-none (read-only)}$( [ $no_delete = 1 ] && echo ', no deletes')" >&2
+exec sandbox-exec -p "$profile" env DISABLE_AUTOUPDATER=1 "$tool_path" "$@"

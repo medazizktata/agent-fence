@@ -1,0 +1,34 @@
+#!/bin/bash
+# nodelete-scan FILE...   structural scan (ast-grep) for file delete/move calls.
+# Prints file:line for each real call and exits 1 if any; 0 if none; 2 if it cannot scan.
+# Words inside strings and comments are not calls, so they never match (unlike grep).
+# Language comes from the extension (.py, .sh). Extensionless scripts are scanned as bash, or
+# as python when their first line names python (via a temp copy; temp copies are left for the OS).
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+RULES="$HERE/nodelete-rules.yml"
+command -v ast-grep >/dev/null || { echo "nodelete-scan: ast-grep not installed" >&2; exit 2; }
+[ -f "$RULES" ] || { echo "nodelete-scan: missing $RULES" >&2; exit 2; }
+[ $# -gt 0 ] || { echo "usage: nodelete-scan FILE..." >&2; exit 2; }
+
+hits=0
+for f in "$@"; do
+  [ -f "$f" ] || { echo "nodelete-scan: no such file: $f" >&2; exit 2; }
+  scan_f=$f
+  case "$f" in
+    *.py|*.sh) ;;
+    *) # ast-grep picks the language from the extension: scan a copy that has one
+       ext=sh; head -1 "$f" | grep -q python && ext=py
+       scan_f=$(mktemp "${TMPDIR:-/tmp}/nodelete-scan.XXXXXX") || exit 2
+       cp "$f" "$scan_f" && mv "$scan_f" "$scan_f.$ext" && scan_f="$scan_f.$ext" || exit 2 ;;
+  esac
+  out=$(ast-grep scan --rule "$RULES" --json=compact "$scan_f" 2>/dev/null)
+  # ast-grep exits non-zero when it finds matches; the JSON on stdout is the answer
+  n=$(jq -e 'if type == "array" then length else error end' <<<"$out" 2>/dev/null) \
+    || { echo "nodelete-scan: ast-grep produced no result for $f" >&2; exit 2; }
+  if [ "$n" -gt 0 ]; then
+    jq -r --arg f "$f" '.[] | "\($f):\(.range.start.line + 1): \(.text | split("\n")[0])"' <<<"$out"
+    hits=$((hits + n))
+  fi
+done
+[ $hits -eq 0 ]
