@@ -7,7 +7,7 @@ than by the agent's own settings.
 **Not:** a network firewall, a container or VM, or a replacement for each tool's own
 permission prompts (it sits under them).
 
-Used by `ccfind ask` (~/Desktop/ccfind) to fence its search agent. It stands on its own.
+Used by `ccfind ask` ([medazizktata/ccfind](https://github.com/medazizktata/ccfind)) to fence its search agent. It stands on its own.
 
     agent-fence claude                       # Claude Code TUI, can write only the current project
     agent-fence codex                        # same for Codex
