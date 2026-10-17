@@ -1,5 +1,14 @@
 # agent-fence — run any agent CLI or TUI inside a macOS sandbox
 
+**For:** anyone letting coding agents (Claude Code, Codex, opencode, cursor-agent) run
+commands on their Mac.
+**Job:** let the agent change only the project you started it in, enforced by the OS rather
+than by the agent's own settings.
+**Not:** a network firewall, a container or VM, or a replacement for each tool's own
+permission prompts (it sits under them).
+
+Used by `ccfind ask` (~/Desktop/ccfind) to fence its search agent. It stands on its own.
+
     agent-fence claude                       # Claude Code TUI, can write only the current project
     agent-fence codex                        # same for Codex
     agent-fence opencode run "fix the test"  # one-shot runs work the same way
