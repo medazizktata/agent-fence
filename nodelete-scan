@@ -15,12 +15,13 @@ hits=0
 for f in "$@"; do
   [ -f "$f" ] || { echo "nodelete-scan: no such file: $f" >&2; exit 2; }
   scan_f=$f
-  case "$f" in
+  case "${f##*/}" in
     *.py|*.sh) ;;
+    *.*) echo "nodelete-scan: cannot scan $f: only .py, .sh and extensionless scripts" >&2; exit 2 ;;
     *) # ast-grep picks the language from the extension: scan a copy that has one
        ext=sh; head -1 "$f" | grep -q python && ext=py
-       scan_f=$(mktemp "${TMPDIR:-/tmp}/nodelete-scan.XXXXXX") || exit 2
-       cp "$f" "$scan_f" && mv "$scan_f" "$scan_f.$ext" && scan_f="$scan_f.$ext" || exit 2 ;;
+       d=$(mktemp -d "${TMPDIR:-/tmp}/nodelete-scan.XXXXXX") || exit 2
+       scan_f="$d/scan.$ext"; cp "$f" "$scan_f" || exit 2 ;;
   esac
   out=$(ast-grep scan --rule "$RULES" --json=compact "$scan_f" 2>/dev/null)
   # ast-grep exits non-zero when it finds matches; the JSON on stdout is the answer

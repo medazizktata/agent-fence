@@ -2,56 +2,101 @@
 
 **For:** anyone letting coding agents (Claude Code, Codex, opencode, cursor-agent) run
 commands on their Mac.
-**Job:** let the agent change only the project you started it in, enforced by the OS rather
-than by the agent's own settings.
-**Not:** a network firewall, a container or VM, or a replacement for each tool's own
-permission prompts (it sits under them).
+**Job:** stop accidents. The agent can change your project and its own files, nothing else
+on disk, enforced by the OS rather than by the agent's own settings.
+**Not:** a defence against a hostile or prompt-injected agent (see Limits), a network
+firewall, a container or VM.
 
-Used by `ccfind ask` ([medazizktata/ccfind](https://github.com/medazizktata/ccfind)) to fence its search agent. It stands on its own.
+Used by `ccfind ask` ([medazizktata/ccfind](https://github.com/medazizktata/ccfind)) to fence
+its search agent. It stands on its own.
 
     agent-fence claude                       # Claude Code TUI, can write only the current project
-    agent-fence codex                        # same for Codex
     agent-fence opencode run "fix the test"  # one-shot runs work the same way
     agent-fence --no-delete cursor-agent     # also no deletes/renames in the project (except .git)
     agent-fence --read-only claude -p "…"    # no project writes at all
     agent-fence --dry-run codex              # print the sandbox rules, run nothing
-
-The OS enforces it for the agent and everything it starts, whatever the model decides. Your
-tool's own permission prompts and sandbox still apply on top (macOS sandboxes nest).
+    agent-fence codex --sandbox danger-full-access   # codex: the fence replaces its own sandbox
 
 | | Allowed | Blocked |
 |---|---|---|
-| Writes | the workspace (current dir or `--workspace DIR`), the tool's own state folder, temp folders, `~/Library/Caches` | everything else: other projects, home, other agents' state and transcripts |
-| Reads | everything else | `~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.config/gh` (`--allow-secrets` to allow) |
+| Writes | the workspace (current dir or `--workspace DIR`), the tool's own state folders, `$TMPDIR`, `/private/tmp`, `~/Library/Caches` | everything else: other projects, home, other agents' state and transcripts |
+| Reads | everything else | `~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.config/gh`, and the ssh-agent socket is hidden (`--allow-secrets` to allow) |
 | Network | everything | nothing (agents need their API) |
 
-Own state folders: claude `~/.claude` (or `$CLAUDE_CONFIG_DIR`) · codex `~/.codex` ·
-opencode `~/.local/share|state|config/opencode`, `~/.cache/opencode` · cursor-agent `~/.cursor`,
-`~/.local/share/cursor-agent`. Other tools get temp folders only; add their state with
-`--allow-write DIR`. `--protect DIR` blocks writes even where they are otherwise allowed.
+Own state folders:
+- **claude:** `~/.claude` (or `$CLAUDE_CONFIG_DIR`), plus `~/.claude.json` and its temp files
+  when `CLAUDE_CONFIG_DIR` is unset
+- **codex:** `~/.codex` (or `$CODEX_HOME`)
+- **opencode:** `~/.local/share/opencode`, `~/.local/state/opencode`, `~/.config/opencode`,
+  `~/.cache/opencode`
+- **cursor-agent** (also `agent`): `~/.cursor`, `~/.local/share/cursor-agent`
 
-It refuses `/` or your home folder as a workspace. `cd` into a project first.
+Other tools get only the temp folders. Add their state with `--allow-write DIR`.
+`--protect DIR` blocks writes even where they are otherwise allowed. Tools run with
+`DISABLE_AUTOUPDATER=1`, because their install folders are not writable.
 
-`--no-delete` caveat: macOS counts a rename as a delete. So it also blocks tools that save files
-by renaming a temp file over the original. Deletes stay possible inside `.git/`, which git needs,
-so a `.git` folder can still be wiped.
+**Refusals:**
+- A workspace or any writable folder that is `/`, your home, `/Users`, `/private`, `/var`,
+  `/Volumes`, `/Library`, `/System`, `/usr`, `/etc`, `/opt`, `/Applications` or `~/Library`.
+- That includes folders from `TMPDIR`, `CODEX_HOME` or `CLAUDE_CONFIG_DIR`, and any spelling
+  of them: folders are compared by identity, not by name.
+- `~/Desktop` and `~/Documents` as a workspace only warn.
 
-## Tested here (2026-10-17)
-- Real runs, each with its own safety on (accept-edits, default permissions), creating a file
-  in a fenced workspace: claude ✓, cursor-agent ✓, opencode ✓ (gemini-3-flash-preview).
-  codex ✗: it fails the same way unfenced ("timed out waiting for cloud config bundle"), so
-  that is a Codex-side problem. A fenced `codex login status` works.
-- Interactive TUIs start fenced and draw their screens with no blocked-write errors: claude
-  (folder-trust prompt), cursor-agent, opencode. codex shows only its name (same Codex issue).
-- Not done: running agents with their own safety off to prove only the fence stops them.
-  Claude Code's classifier blocks that as creating unsafe agents. The fence's blocking is
-  proven with plain processes in `./test.sh` instead.
+**macOS does not nest sandboxes.** Inside any restricted sandbox, starting another one fails
+("sandbox_apply: Operation not permitted"). So a tool's own sandbox cannot start inside the
+fence, and the fence replaces it. For codex, use `--sandbox danger-full-access` inside the
+fence; agent-fence prints this reminder. For the same reason `test.sh` must run from a normal
+terminal, not inside a fenced agent.
+
+**`--no-delete`:**
+- It blocks deletes and renames in the workspace only. State, temp and `--allow-write` folders
+  stay deletable.
+- It does not stop overwriting or truncating a file.
+- macOS counts a rename as a delete. So tools that save by renaming a temp file over the
+  original fail or leave `*.tmp` files behind. Claude Code's Write tool falls back to a
+  direct write.
+- Deletes stay possible inside `.git/`, which git needs. A `.git` folder's contents can be
+  wiped; the empty folder remains.
+
+## Limits (read before trusting it)
+- `sandbox-exec` is deprecated by Apple (`man sandbox-exec`). It still works on macOS today.
+- The profile is open by default. Only file writes and five secret paths are restricted.
+  Network, IPC and starting programs are not.
+- Programs started through launchd, `open`, AppleScript or XPC are not descendants, so the
+  fence does not cover them.
+- Anything readable can be sent over the network, and the secret list is short: cloud, docker
+  and npm tokens, keychains and browser profiles are readable. The tool's own state folder is
+  writable, and that is its config, hooks and MCP definitions, which apply on the next
+  unfenced run.
+- Rules are by path. Hard links were not tested.
+- For untrusted input, use a separate macOS user or a VM or container with only the project
+  mounted and filtered egress, or work on a copy (`cp -c`, `git worktree`) and review the diff.
+
+## Tested (2026-10-17/18)
+- `./test.sh`: 36 checks with stub agents in a fake home, so the OS really blocks or allows
+  each write. Calibration (`--calibrate`) runs 11 sabotaged copies of agent-fence, one per
+  defence. Each must fail the check meant to catch it, and does.
+- Real tools with their own safety on, each creating a file in a fenced project: claude ✓,
+  cursor-agent ✓, opencode ✓. Their TUIs start fenced. codex failed the same way unfenced (its
+  own "cloud config bundle" error), so it is untested.
+- A blind audit (an agent given only this repo) reproduced the profile, option and refusal
+  behaviour. It found the nesting limit, a lower-case path bypass, unchecked env paths and
+  scanner gaps, all fixed since.
+- Not done here: real delete attempts. `check-delete-blocking.sh` is for you to run.
 
 ## Tests
-    ./test.sh               25 offline checks with stub agents (free, ~3s)
-    ./test.sh --calibrate   proves the checks can fail (3 broken fences must be caught)
-    ./check-delete-blocking.sh   for you to run: real delete attempts on throwaway files
+    ./test.sh               36 checks (free, ~5 s); exits 3 if run inside a sandbox
+    ./test.sh --calibrate   11 sabotaged copies, each caught by its own check
+    ./check-delete-blocking.sh   for you: real delete attempts on throwaway files
 
-`nodelete-scan FILE...` is a structural (ast-grep) scan for delete/move calls. It finds real
-calls only, not the same words in strings or comments. Rules are in `nodelete-rules.yml`, and
-it is calibrated on `samples/` every test run.
+`nodelete-scan FILE...` is a structural (ast-grep) scan of `.py`, `.sh` and extensionless
+scripts:
+- **Finds:** bash deletes (`rm` and friends, by path too, through `sudo`, `env`, `xargs`,
+  `command` and other wrappers, `find -delete`, `git clean`, `rsync --delete`) and Python
+  deletes and moves.
+- **Misses:** code inside strings (`bash -c`, `eval`, `python3 -c`, subprocess), here-doc
+  bodies, aliases, bash `mv`.
+- **Other files** are refused (exit 2), not reported clean.
+- **Known false positive:** a wrapper command with an rm-like word anywhere in it.
+
+It is calibrated on `samples/` every run.

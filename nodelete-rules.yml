@@ -1,6 +1,8 @@
-# ast-grep rules: calls that delete or move files. Used by the ccfind and agent-fence
-# harnesses as a structural check (`ast-grep scan --rule nodelete-rules.yml <files>`).
-# They match real calls only, never the same words inside strings or comments.
+# ast-grep rules: calls that delete files (bash and python) and move them (python). Used by
+# nodelete-scan, the agent-fence and ccfind harnesses. They match real calls only, never the
+# same words inside strings or comments. Narrow by design. Not seen: code inside strings run
+# by `bash -c`, `eval`, `python3 -c`, subprocess or os.system; here-doc bodies; aliases; bash mv.
+# Known false positive: a wrapper (env, sudo, xargs, ...) with an rm-family word anywhere.
 id: python-delete-call
 language: python
 severity: error
@@ -24,6 +26,30 @@ severity: error
 message: file delete command
 rule:
   kind: command
-  has:
-    field: name
-    regex: ^(rm|rmdir|unlink|shred|srm)$
+  any:
+    # rm and friends, by name or by full path (/bin/rm)
+    - has:
+        field: name
+        regex: ^(\S*/)?(rm|rmdir|unlink|shred|srm)$
+    # run through a wrapper: command rm, sudo rm, env rm, xargs rm, find -exec rm, ...
+    # (arguments are matched as any direct `word` child: a field-based `has` checks only the
+    # first argument, which missed `find -name x -exec rm`)
+    - all:
+        - has:
+            field: name
+            regex: ^(\S*/)?(command|builtin|env|sudo|doas|xargs|exec|nohup|time|nice|find)$
+        - has:
+            kind: word
+            regex: ^(\S*/)?(rm|rmdir|unlink|shred|srm)$
+    # find ... -delete
+    - all:
+        - has: { field: name, regex: ^(\S*/)?find$ }
+        - has: { kind: word, regex: ^-delete$ }
+    # git clean
+    - all:
+        - has: { field: name, regex: ^(\S*/)?git$ }
+        - has: { kind: word, regex: ^clean$ }
+    # rsync --delete*
+    - all:
+        - has: { field: name, regex: ^(\S*/)?rsync$ }
+        - has: { kind: word, regex: ^--delete }

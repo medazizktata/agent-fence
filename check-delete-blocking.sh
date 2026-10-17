@@ -9,7 +9,7 @@ mkdir -p "$W" "$O"
 try() {  # try <expect: kept|gone> <label> <file> <agent-fence options...>
   local want=$1 label=$2 f=$3; shift 3
   echo throwaway > "$f"
-  (cd "$W" && agent-fence "$@" /bin/rm -f "$f") >/dev/null 2>&1
+  (cd "$W" && "$HERE/agent-fence" "$@" /bin/rm -f "$f") >/dev/null 2>&1   # this copy, not PATH's
   local got=gone; [ -e "$f" ] && got=kept
   if [ "$got" = "$want" ]; then echo "  ok    $label ($got)"; else echo "  FAIL  $label (file $got, want $want)"; fi
 }
