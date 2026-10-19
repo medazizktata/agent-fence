@@ -82,7 +82,9 @@ terminal, not inside a fenced agent.
 - A blind audit (an agent given only this repo) reproduced the profile, option and refusal
   behaviour. It found the nesting limit, a lower-case path bypass, unchecked env paths and
   scanner gaps, all fixed since.
-- Not done here: real delete attempts. `check-delete-blocking.sh` is for you to run.
+- Real delete attempts (`/bin/rm` on throwaway files, run by a human with
+  `check-delete-blocking.sh`): `--no-delete` kept the workspace file, a file outside the
+  workspace was kept, and the default mode deleted the workspace file.
 
 ## Tests
     ./test.sh               36 checks (free, ~5 s); exits 3 if run inside a sandbox
