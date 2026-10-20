@@ -39,6 +39,7 @@ PY
     "no-git-exception|    printf '(allow file-write-unlink (require-all (subpath %s) (regex #\"/\\\\.git/\")))\\n' \"\$(q \"\$ws\")\"|git commit still works"
     "no-secrets|  if [ \$secrets = 0 ]; then|secrets unreadable"
     "no-protect|  if [ \${#protect[@]} -gt 0 ]; then|--protect wins"
+    "no-hide|  if [ \${#hide[@]} -gt 0 ]; then|--hide blocks reading"
     "no-codex-state|    state=(\"\${CODEX_HOME:-\$HOME/.codex}\")|codex: writes its workspace and own state"
     "no-broad-check|      die \"refusing to allow writes to '\$1' (\$2): too broad. Pick a narrower folder.\"|refuses HOME as workspace"
     "no-inode-compare|    if [ -e \"\$b\" ] && [ \"\$1\" -ef \"\$b\" ]; then|refuses HOME spelled in lower case"
@@ -50,7 +51,7 @@ PY
     name=${s%%|*}; rest=${s#*|}; line=${rest%|*}; want=${rest##*|}
     case "$name" in
       no-sandbox) ;;
-      no-secrets|no-protect) sabotage "$name" "$line" "  if false; then" || { echo "  FAIL  $name: line not found"; bad=1; continue; } ;;
+      no-secrets|no-protect|no-hide) sabotage "$name" "$line" "  if false; then" || { echo "  FAIL  $name: line not found"; bad=1; continue; } ;;
       no-broad-check) sabotage "$name" "$line" "      return 0" || { echo "  FAIL  $name: line not found"; bad=1; continue; } ;;
       no-inode-compare) sabotage "$name" "$line" '    if [ -e "$b" ] && [ "$1" = "$b" ]; then' || { echo "  FAIL  $name: line not found"; bad=1; continue; } ;;
       no-codex-state) sabotage "$name" "$line" "    state=()" || { echo "  FAIL  $name: line not found"; bad=1; continue; } ;;
@@ -139,6 +140,9 @@ run f --allow-write "$H/outside" codex write:"$H/outside/x"
 check "--allow-write adds a folder"               0 "+wrote $H/outside/x"
 run f --protect "$W/protected" codex write:"$W/protected/x" write:"$W/ok.txt"
 check "--protect wins inside the workspace"       0 "+blocked-write $W/protected/x" "+wrote $W/ok.txt"
+echo hidden > "$W/hidden.txt"
+run f --hide "$W/hidden.txt" codex read:"$W/hidden.txt" read:"$W/in.txt"
+check "--hide blocks reading that file only"      0 "+blocked-read $W/hidden.txt" "+read $W/in.txt"
 run f --allow-secrets codex read:"$H/.ssh/config"
 check "--allow-secrets makes ~/.ssh readable"     0 "+read $H/.ssh/config"
 SSH_AUTH_SOCK=/tmp/fake-agent.sock run f codex env:SSH_AUTH_SOCK

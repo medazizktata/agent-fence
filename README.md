@@ -32,7 +32,8 @@ Own state folders:
 - **cursor-agent** (also `agent`): `~/.cursor`, `~/.local/share/cursor-agent`
 
 Other tools get only the temp folders. Add their state with `--allow-write DIR`.
-`--protect DIR` blocks writes even where they are otherwise allowed. Tools run with
+`--protect DIR` blocks writes even where they are otherwise allowed. `--hide PATH` blocks
+reading and writing a file or folder (`ccfind ask` hides the calling session's transcript). Tools run with
 `DISABLE_AUTOUPDATER=1`, because their install folders are not writable.
 
 **Refusals:**
@@ -73,12 +74,14 @@ terminal, not inside a fenced agent.
   mounted and filtered egress, or work on a copy (`cp -c`, `git worktree`) and review the diff.
 
 ## Tested (2026-10-17/18)
-- `./test.sh`: 36 checks with stub agents in a fake home, so the OS really blocks or allows
-  each write. Calibration (`--calibrate`) runs 11 sabotaged copies of agent-fence, one per
+- `./test.sh`: 37 checks with stub agents in a fake home, so the OS really blocks or allows
+  each write. Calibration (`--calibrate`) runs 12 sabotaged copies of agent-fence, one per
   defence. Each must fail the check meant to catch it, and does.
 - Real tools with their own safety on, each creating a file in a fenced project: claude ✓,
-  cursor-agent ✓, opencode ✓. Their TUIs start fenced. codex failed the same way unfenced (its
-  own "cloud config bundle" error), so it is untested.
+  cursor-agent ✓, opencode ✓. Their TUIs start fenced.
+- codex 0.160.0 (2026-10-20): `codex exec` answers fenced. With its own sandbox on
+  (`--sandbox workspace-write`), its file write fails inside the fence, as the nesting limit
+  predicts. Fenced writes with `--sandbox danger-full-access` are not tested here.
 - A blind audit (an agent given only this repo) reproduced the profile, option and refusal
   behaviour. It found the nesting limit, a lower-case path bypass, unchecked env paths and
   scanner gaps, all fixed since.
@@ -87,8 +90,8 @@ terminal, not inside a fenced agent.
   workspace was kept, and the default mode deleted the workspace file.
 
 ## Tests
-    ./test.sh               36 checks (free, ~5 s); exits 3 if run inside a sandbox
-    ./test.sh --calibrate   11 sabotaged copies, each caught by its own check
+    ./test.sh               37 checks (free, ~5 s); exits 3 if run inside a sandbox
+    ./test.sh --calibrate   12 sabotaged copies, each caught by its own check
     ./check-delete-blocking.sh   for you: real delete attempts on throwaway files
 
 `nodelete-scan FILE...` is a structural (ast-grep) scan of `.py`, `.sh` and extensionless

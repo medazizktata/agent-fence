@@ -13,6 +13,7 @@
 #                        Breaks tools that save files by renaming a temp file over the original.
 #   --allow-write DIR    also allow writes in DIR (repeatable)
 #   --protect DIR        deny writes in DIR even where otherwise allowed (repeatable)
+#   --hide PATH          deny reads and writes of PATH, a file or folder (repeatable)
 #   --allow-secrets      allow reading ~/.ssh ~/.aws ~/.gnupg ~/.netrc ~/.config/gh and using
 #                        the ssh-agent (needed for e.g. git push over ssh)
 #   --dry-run            print the sandbox profile and the command, run nothing
@@ -41,7 +42,7 @@ for part in [x for x in p.split("/") if x]:
 print(out)' "$1"; }
 q() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }   # SBPL string literal
 
-workspace="$PWD" ws_given=0 read_only=0 no_delete=0 secrets=0 dry=0 extra=() protect=()
+workspace="$PWD" ws_given=0 read_only=0 no_delete=0 secrets=0 dry=0 extra=() protect=() hide=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --workspace)     [ $# -ge 2 ] || die "--workspace needs a directory"; workspace=$2; ws_given=1; shift 2 ;;
@@ -49,6 +50,7 @@ while [ $# -gt 0 ]; do
     --no-delete)     no_delete=1; shift ;;
     --allow-write)   [ $# -ge 2 ] || die "--allow-write needs a directory"; extra+=("$2"); shift 2 ;;
     --protect)       [ $# -ge 2 ] || die "--protect needs a directory"; protect+=("$2"); shift 2 ;;
+    --hide)          [ $# -ge 2 ] || die "--hide needs a path"; hide+=("$2"); shift 2 ;;
     --allow-secrets) secrets=1; shift ;;
     --dry-run)       dry=1; shift ;;
     -h|--help)       awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;;
@@ -138,6 +140,11 @@ profile=$(
   if [ $secrets = 0 ]; then
     echo '(deny file-read* file-write*'
     for p in "${secret_dirs[@]}"; do subpaths "$home/$p"; done
+    echo ')'
+  fi
+  if [ ${#hide[@]} -gt 0 ]; then
+    echo '(deny file-read* file-write*'
+    for p in "${hide[@]}"; do subpaths "$(real "$p")"; done
     echo ')'
   fi
 )
